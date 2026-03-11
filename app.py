@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, Canvas
 from typing import Optional
 
 import customtkinter as ctk
-from PIL import Image, ImageTk, ImageDraw, ImageFilter
+from PIL import Image, ImageTk
 
 import converter
 
@@ -1029,18 +1029,20 @@ class App(ctk.CTk):
         def check():
             self._log("Checking browser engine…")
             self._set_status("Checking browser…", PAL["warn"])
-            if not converter.check_playwright_installed():
-                self._log("Chromium not found — installing…", "warn")
+            name = converter.get_available_browser_name()
+            if name:
+                self._log(f"Browser ready: {name}.", "success")
+                self._set_status(f"Ready ({name})", PAL["accent"])
+            else:
+                self._log("No browser found — trying to install Chromium…", "warn")
                 ok = converter.install_playwright_browser(on_status=self._log)
                 if ok:
                     self._log("Browser engine ready.", "success")
                     self._set_status("Ready to convert", PAL["accent"])
                 else:
-                    self._log("Run: python -m playwright install chromium", "error")
-                    self._set_status("Browser missing", PAL["danger"])
-            else:
-                self._log("Browser engine ready.", "success")
-                self._set_status("Ready to convert", PAL["accent"])
+                    self._log("Install Chrome or Edge to use this app.", "error")
+                    self._log("Or run: python -m playwright install chromium", "warn")
+                    self._set_status("No browser found", PAL["danger"])
         threading.Thread(target=check, daemon=True).start()
 
     def start_conversion(self):
@@ -1146,4 +1148,6 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()   # Required for PyInstaller on Windows
     App().mainloop()

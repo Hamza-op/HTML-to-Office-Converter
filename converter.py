@@ -55,6 +55,28 @@ def _build_file_url(abs_path: str) -> str:
     return "file://" + abs_path
 
 
+# Channels to try in order: system Chrome, Edge, Firefox, then Playwright Chromium
+_BROWSER_CHANNELS = ["chrome", "msedge", None]
+
+
+async def _launch_best_browser(pw, **kwargs):
+    """Try system Chrome → Edge → Playwright Chromium in order."""
+    last_err = None
+    for channel in _BROWSER_CHANNELS:
+        try:
+            opts = dict(kwargs)
+            if channel:
+                opts["channel"] = channel
+            return await pw.chromium.launch(**opts)
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(
+        f"No usable browser found. Install Chrome or Edge, or run: "
+        f"playwright install chromium\n({last_err})"
+    )
+
+
 # ─────────────────────────────────────────────────────────────────
 #  HTML → PDF (via Playwright)
 # ─────────────────────────────────────────────────────────────────
@@ -81,7 +103,7 @@ async def _render_html_to_pdf(
 
     status("Launching browser...")
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        browser = await _launch_best_browser(pw, headless=True)
         page = await browser.new_page()
 
         abs_path = os.path.abspath(html_path)
@@ -275,7 +297,7 @@ async def _render_html_pages(
 
     status("Launching browser...")
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        browser = await _launch_best_browser(pw, headless=True)
         page = await browser.new_page(
             viewport={"width": viewport_width, "height": 1700},
             device_scale_factor=device_scale_factor,
@@ -641,25 +663,70 @@ def html_to_editable_pptx(
 # ─────────────────────────────────────────────────────────────────
 
 def check_playwright_installed() -> bool:
-    """Check if Playwright browsers are installed."""
+    """
+    Check if any usable browser is available.
+    Tries system Chrome, Edge, then Playwright's own Chromium.
+    """
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
-            browser.close()
-        return True
+            for channel in _BROWSER_CHANNELS:
+                try:
+                    opts = {"headless": True}
+                    if channel:
+                        opts["channel"] = channel
+                    browser = pw.chromium.launch(**opts)
+                    browser.close()
+                    return True
+                except Exception:
+                    continue
+        return False
     except Exception:
         return False
+
+
+def get_available_browser_name() -> str:
+    """
+    Return the name of the first usable browser, e.g. 'Chrome', 'Edge',
+    or 'Playwright Chromium'.  Returns '' if none found.
+    """
+    labels = {"chrome": "Chrome", "msedge": "Edge", None: "Playwright Chromium"}
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            for channel in _BROWSER_CHANNELS:
+                try:
+                    opts = {"headless": True}
+                    if channel:
+                        opts["channel"] = channel
+                    browser = pw.chromium.launch(**opts)
+                    browser.close()
+                    return labels[channel]
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return ""
 
 
 def install_playwright_browser(
     on_status: Optional[Callable[[str], None]] = None,
 ) -> bool:
-    """Install Playwright Chromium browser."""
+    """
+    Last-resort: install Playwright's bundled Chromium.
+    Only reached when no system browser (Chrome/Edge) is found.
+    """
     import subprocess
 
     status = on_status or (lambda _: None)
-    status("Installing Chromium browser (one-time, ~150MB)...")
+    status("No system browser found. Installing Chromium (~150MB)...")
+
+    # When frozen, sys.executable IS the exe — cannot use it as python.
+    # Fall back to the playwright CLI that ships with the Python package.
+    if getattr(sys, "frozen", False):
+        status("Run: python -m playwright install chromium")
+        status("Or install Google Chrome or Microsoft Edge.")
+        return False
 
     try:
         result = subprocess.run(
