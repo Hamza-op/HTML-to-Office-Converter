@@ -4,12 +4,12 @@ A modern desktop application to convert HTML files into editable DOCX and PPTX f
 
 ## Features
 
-- **HTML to DOCX**: Converts HTML to highly-accurate, editable Word documents. It carefully preserves layout and styling by utilizing a Playwright to PDF to DOCX pipeline.
-- **HTML to Editable PPTX**: Parses HTML natively into editable PowerPoint shapes, text frames, and tables using `python-pptx`.
-- **Modern UI**: Polished, responsive interface built with CustomTkinter, featuring drag-and-drop, real-time activity logging, and live visual previews.
+- **HTML/PDF to DOCX**: Converts HTML or PDF to highly-accurate, editable Word documents.
+- **HTML/PDF to Editable PPTX**: Parses HTML or PDF natively into editable PowerPoint shapes, text frames, and images. Move, edit, or resize any element.
+- **Modern UI**: Polished "Warm Amber" interface built with CustomTkinter, featuring drag-and-drop, real-time activity logging, and live visual previews.
 - **Cross-Platform**: Designed to work gracefully on Windows, macOS, and Linux.
 - **Standalone Executable**: Run the application as a single `.exe` file without installing Python or dependencies.
-- **System Browser Integration**: Automatically detects and uses installed Google Chrome or Microsoft Edge for HTML parsing, eliminating the need to download massive browser binaries.
+- **System Browser Integration**: Automatically detects and uses installed Google Chrome or Microsoft Edge for HTML parsing.
 
 ## Requirements
 
@@ -88,6 +88,17 @@ If you want to build the standalone `.exe` yourself:
 - A ~130 MB Windows onefile EXE is normal for PyInstaller apps that bundle Python + Tk + Pillow and also include Playwright/PyMuPDF for high-fidelity rendering and previews.
 - For the fastest startup, prefer the `onedir` build.
 
+
+## GitHub Auto-Release
+
+The project includes a GitHub Actions workflow to automatically build and release the Windows executable:
+
+1. Push a version tag:
+   ```bash
+   git tag v2.1.0
+   git push origin v2.1.0
+   ```
+2. The `.github/workflows/releaser.yml` will trigger, build the EXE on a Windows runner, create a new GitHub Release, and upload the `HTML-to-Office-Converter.exe` asset automatically.
 
 ## License
 
