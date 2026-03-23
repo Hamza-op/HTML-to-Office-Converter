@@ -744,3 +744,146 @@ def install_playwright_browser(
     except Exception as e:
         status(f"Install error: {e}")
         return False
+
+
+def pdf_to_editable_pptx(
+    pdf_path: str,
+    output_path: str,
+    slide_size: str = "Widescreen (16:9)",
+    on_status: Optional[Callable[[str], None]] = None,
+) -> str:
+    """Parse PDF to native editable PPTX elements (text, vector, images)."""
+    import fitz
+    from pptx import Presentation
+    from pptx.util import Pt, Inches
+    from pptx.dml.color import RGBColor
+    try:
+        from pptx.enum.shapes import MSO_SHAPE
+        RECTANGLE = MSO_SHAPE.RECTANGLE
+    except ImportError:
+        RECTANGLE = 1
+    from io import BytesIO
+
+    status = on_status or (lambda _: None)
+    status("Parsing PDF to editable PPTX...")
+
+    prs = Presentation()
+    blank_layout = prs.slide_layouts[6]
+
+    doc = fitz.open(pdf_path)
+
+    if len(doc) > 0:
+        page_rect = doc[0].rect
+        pdf_w, pdf_h = page_rect.width, page_rect.height
+        prs.slide_width = Pt(max(pdf_w, 10))
+        prs.slide_height = Pt(max(pdf_h, 10))
+    else:
+        if "4:3" in slide_size:
+            prs.slide_width = Inches(10)
+            prs.slide_height = Inches(7.5)
+        else:
+            prs.slide_width = Inches(13.333)
+            prs.slide_height = Inches(7.5)
+
+    for i in range(len(doc)):
+        status(f"Processing PDF page {i+1}/{len(doc)}...")
+        page = doc[i]
+        slide = prs.slides.add_slide(blank_layout)
+
+        for img in page.get_images(full=True):
+            xref = img[0]
+            try:
+                base_image = doc.extract_image(xref)
+                if not base_image: continue
+                image_bytes = base_image["image"]
+                rects = page.get_image_rects(img)
+                for rect in rects:
+                    try:
+                        slide.shapes.add_picture(
+                            BytesIO(image_bytes),
+                            Pt(rect.x0), Pt(rect.y0),
+                            width=Pt(rect.width), height=Pt(rect.height)
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        paths = page.get_drawings()
+        for p in paths:
+            rect = p["rect"]
+            try:
+                if rect.width <= 0 or rect.height <= 0: continue
+                
+                stroke_color = p.get("color")
+                fill_color = p.get("fill")
+                
+                if not stroke_color and not fill_color:
+                    continue
+
+                shape = slide.shapes.add_shape(
+                    RECTANGLE,
+                    Pt(rect.x0), Pt(rect.y0),
+                    Pt(rect.width), Pt(rect.height)
+                )
+                
+                if fill_color:
+                    shape.fill.solid()
+                    shape.fill.fore_color.rgb = RGBColor(
+                        int(fill_color[0]*255), int(fill_color[1]*255), int(fill_color[2]*255)
+                    )
+                else:
+                    shape.fill.background()
+                    
+                if stroke_color:
+                    shape.line.color.rgb = RGBColor(
+                        int(stroke_color[0]*255), int(stroke_color[1]*255), int(stroke_color[2]*255)
+                    )
+                else:
+                    shape.line.fill.background()
+            except Exception:
+                pass
+
+        text_dict = page.get_text("dict")
+        for block in text_dict.get("blocks", []):
+            if block["type"] == 0:
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        text = span["text"].strip()
+                        if not text: continue
+                        
+                        font_size = span["size"]
+                        color_int = span["color"]
+                        b = color_int & 255
+                        g = (color_int >> 8) & 255
+                        r = (color_int >> 16) & 255
+                        
+                        bbox = span["bbox"]
+                        width = max(Pt(bbox[2] - bbox[0]), Pt(10))
+                        height = max(Pt(bbox[3] - bbox[1]), Pt(10))
+                        
+                        try:
+                            txBox = slide.shapes.add_textbox(Pt(bbox[0]), Pt(bbox[1]), width, height)
+                            tf = txBox.text_frame
+                            tf.word_wrap = False
+                            
+                            tf.margin_bottom = 0
+                            tf.margin_top = 0
+                            tf.margin_left = 0
+                            tf.margin_right = 0
+                            
+                            p_para = tf.paragraphs[0]
+                            p_para.text = text
+                            p_para.font.size = Pt(font_size)
+                            p_para.font.color.rgb = RGBColor(r, g, b)
+                            
+                            flags = span["flags"]
+                            if flags & (1 << 4): p_para.font.bold = True
+                            if flags & (1 << 1): p_para.font.italic = True
+                        except Exception:
+                            pass
+
+    doc.close()
+    prs.save(output_path)
+    status(f"Editable PPTX saved: {os.path.basename(output_path)}")
+    return output_path

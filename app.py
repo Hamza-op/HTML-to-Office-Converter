@@ -27,42 +27,42 @@ ctk.set_default_color_theme("blue")
 
 SP = {"xs": 4, "sm": 8, "md": 12, "lg": 16, "xl": 24, "2xl": 32, "3xl": 40, "4xl": 48}
 
-# Colors — (light, dark) tuples
+# Colors — warm amber/copper palette
 PAL = {
-    "root":         ("#F8F9FA", "#06090F"),
-    "surface_0":    ("#F1F5F9", "#0D1117"),
-    "surface_1":    ("#FFFFFF", "#151B23"),
-    "surface_2":    ("#F1F5F9", "#1C2333"),
-    "surface_3":    ("#E2E8F0", "#242E3F"),
-    "overlay":      ("#FFFFFF", "#1A2233"),
-    "canvas":       ("#E2E8F0", "#020509"),
-    "inset":        ("#F8FAFC", "#0A0F18"),
+    "root":         ("#FAF9F7", "#08090C"),
+    "surface_0":    ("#F3F1EE", "#0E1015"),
+    "surface_1":    ("#FFFFFF", "#16181F"),
+    "surface_2":    ("#F5F3F0", "#1C1F28"),
+    "surface_3":    ("#E8E5E0", "#252830"),
+    "overlay":      ("#FFFFFF", "#1A1D26"),
+    "canvas":       ("#E8E5E0", "#030406"),
+    "inset":        ("#FAF8F6", "#0A0C12"),
 
-    "accent":       "#8B5CF6",     # Indigo/Violet
-    "accent_h":     "#A78BFA",
-    "accent_dim":   "#7C3AED",
-    "accent_deep":  "#5B21B6",
-    "accent_bg":    ("#F5F3FF", "#1E1B4B"),
-    "accent_soft":  ("#EDE9FE", "#2E1065"),
-    "accent_ghost": ("#F5F3FF", "#1E1B4B"),
+    "accent":       "#D97706",     # Warm Amber
+    "accent_h":     "#F59E0B",
+    "accent_dim":   "#B45309",
+    "accent_deep":  "#92400E",
+    "accent_bg":    ("#FFFBEB", "#1C1308"),
+    "accent_soft":  ("#FEF3C7", "#271E05"),
+    "accent_ghost": ("#FFFBEB", "#1C1308"),
 
-    "danger":       "#EF4444",
-    "danger_h":     "#F87171",
+    "danger":       "#DC2626",
+    "danger_h":     "#EF4444",
     "danger_bg":    ("#FEF2F2", "#2A0A0A"),
-    "warn":         "#F59E0B",
-    "info":         "#3B82F6",
+    "warn":         "#EA580C",
+    "info":         "#0284C7",
 
-    "t1":           ("#0F172A", "#F0F6FC"),
-    "t2":           ("#334155", "#C9D1D9"),
-    "t3":           ("#475569", "#8B949E"),
-    "t4":           ("#64748B", "#6E7681"),
-    "t5":           ("#94A3B8", "#484F58"),
+    "t1":           ("#1C1917", "#FAFAF9"),
+    "t2":           ("#44403C", "#D6D3D1"),
+    "t3":           ("#57534E", "#A8A29E"),
+    "t4":           ("#78716C", "#6E6862"),
+    "t5":           ("#A8A29E", "#44403C"),
 
-    "b1":           ("#E5E7EB", "#30363D"),
-    "b2":           ("#F3F4F6", "#21262D"),
-    "b3":           ("#D1D5DB", "#3D444D"),
-    "b_accent":     ("#C4B5FD", "#4C1D95"),
-    "b_focus":      ("#8B5CF6", "#8B5CF6"),
+    "b1":           ("#D6D3D1", "#2E2C2A"),
+    "b2":           ("#E7E5E4", "#1F1E1C"),
+    "b3":           ("#D1CCC5", "#3B3836"),
+    "b_accent":     ("#FDE68A", "#451A03"),
+    "b_focus":      ("#D97706", "#D97706"),
 }
 
 FONT = "Segoe UI"
@@ -97,7 +97,7 @@ class PulseButton(ctk.CTkButton):
         super().__init__(master, **kw)
         self._pulse = True
         self._pulse_idx = 0
-        self._colors = ["#8B5CF6", "#7C3AED", "#6D28D9", "#7C3AED"]
+        self._colors = ["#D97706", "#B45309", "#92400E", "#B45309"]
         self._do_pulse()
 
     def _do_pulse(self):
@@ -258,7 +258,7 @@ class Sidebar(ctk.CTkFrame):
         info = ctk.CTkFrame(dz, fg_color="transparent")
         info.pack(side="left", padx=(SP["sm"], 0), fill="x", expand=True)
 
-        self.drop_title = ctk.CTkLabel(info, text="Drop .html files here",
+        self.drop_title = ctk.CTkLabel(info, text="Drop .html or .pdf files here",
             font=ctk.CTkFont(family=FONT, size=12, weight="bold"),
             text_color=PAL["t1"], anchor="w")
         self.drop_title.pack(anchor="w")
@@ -437,7 +437,7 @@ class Sidebar(ctk.CTkFrame):
 
     def _browse(self):
         paths = filedialog.askopenfilenames(
-            filetypes=[("HTML Files", "*.html *.htm"), ("All", "*.*")])
+            filetypes=[("HTML & PDF Files", "*.html *.htm *.pdf"), ("All", "*.*")])
         if paths:
             existing = set(self.app._files)
             new = [p for p in paths if p not in existing]
@@ -465,7 +465,7 @@ class Sidebar(ctk.CTkFrame):
             self.file_list.pack_forget()
             self.clear_btn.pack_forget()
             self.drop_title.configure(text="Drop files here")
-            self.drop_sub.configure(text="or click Browse to select .html files")
+            self.drop_sub.configure(text="or click Browse to select .html or .pdf files")
             self.drop_zone.configure(border_color=PAL["b_accent"])
             return
 
@@ -488,7 +488,7 @@ class Sidebar(ctk.CTkFrame):
             card.pack_propagate(False)
 
             # Extension badge
-            ext_colors = {".html": ("#E44D26", "#FFF3EE"), ".htm": ("#E44D26", "#FFF3EE")}
+            ext_colors = {".html": ("#E44D26", "#FFF3EE"), ".htm": ("#E44D26", "#FFF3EE"), ".pdf": ("#D9383A", "#FCE8E8")}
             ec, ebg = ext_colors.get(ext, (PAL["accent"], PAL["accent_bg"]))
 
             badge = ctk.CTkFrame(card, fg_color=ebg if isinstance(ebg, str) else ebg,
@@ -690,7 +690,7 @@ class PreviewPanel(ctk.CTkFrame):
             font=ctk.CTkFont(family=FONT, size=22, weight="bold"),
             text_color=PAL["t3"]).pack(pady=(SP["xl"], SP["xs"]))
 
-        ctk.CTkLabel(self._empty, text="Select HTML files and click Convert\nto see a live preview here",
+        ctk.CTkLabel(self._empty, text="Select HTML or PDF files and click Convert\nto see a live preview here",
             font=ctk.CTkFont(family=FONT, size=13),
             text_color=PAL["t5"], justify="center").pack()
 
@@ -707,7 +707,7 @@ class PreviewPanel(ctk.CTkFrame):
 
     def _update_bg(self):
         m = ctk.get_appearance_mode()
-        self.canvas.configure(bg="#DDE3ED" if m == "Light" else "#020509")
+        self.canvas.configure(bg="#E8E2D8" if m == "Light" else "#030406")
 
     def set_pages(self, pages):
         self._pages = pages
@@ -754,14 +754,14 @@ class PreviewPanel(ctk.CTkFrame):
 
         # Multi-layer shadow
         mode = ctk.get_appearance_mode()
-        shd = (["#A0A8B4","#B0B8C4","#BCC4D0","#C8D0DC","#D4DCE4"]
+        shd = (["#B8AFA4","#C4BCB2","#D0C9C0","#DCD6CE","#E4DED6"]
                if mode == "Light"
-               else ["#010204","#020408","#03060C","#040810","#060B14"])
+               else ["#010203","#020305","#030408","#04060A","#06080E"])
         for i, c in enumerate(shd):
             o = (len(shd) - i) * 3
             self.canvas.create_rectangle(sx+o, sy+o, ex+o, ey+o, fill=c, outline="", width=0)
 
-        bc = "#CBD5E1" if mode == "Light" else "#1E293B"
+        bc = "#C4BBB0" if mode == "Light" else "#1E1C19"
         self.canvas.create_rectangle(sx-1, sy-1, ex+1, ey+1, outline=bc, width=1)
         self.canvas.create_image(cx, cy, image=self._tk_img, anchor="center")
 
@@ -865,7 +865,7 @@ class ActivityLog(ctk.CTkFrame):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("HTML → Office Converter")
+        self.title("HTML/PDF → Office Converter")
         self.geometry("1260x840")
         self.minsize(1000, 660)
         self.configure(fg_color=PAL["root"])
@@ -899,11 +899,11 @@ class App(ctk.CTk):
             border_width=1, border_color=PAL["b_accent"])
         ico_frame.pack(side="left")
         ico_frame.pack_propagate(False)
-        ctk.CTkLabel(ico_frame, text="⬡",
+        ctk.CTkLabel(ico_frame, text="◈",
             font=ctk.CTkFont(size=20, weight="bold"),
             text_color=PAL["accent"]).place(relx=0.5, rely=0.5, anchor="center")
 
-        ctk.CTkLabel(logo, text="HTML → Office",
+        ctk.CTkLabel(logo, text="HTML/PDF → Office",
             font=ctk.CTkFont(family=FONT, size=20, weight="bold"),
             text_color=PAL["t1"]).pack(side="left", padx=(SP["md"], 0))
 
@@ -915,7 +915,7 @@ class App(ctk.CTk):
         vpill = ctk.CTkFrame(logo, fg_color=PAL["accent_bg"], corner_radius=8,
             border_width=1, border_color=PAL["b_accent"])
         vpill.pack(side="left", padx=(SP["md"], 0))
-        ctk.CTkLabel(vpill, text="v2.0",
+        ctk.CTkLabel(vpill, text="v2.1",
             font=ctk.CTkFont(family=MONO, size=9, weight="bold"),
             text_color=PAL["accent"]).pack(padx=SP["sm"], pady=2)
 
@@ -1049,7 +1049,7 @@ class App(ctk.CTk):
         if self._converting:
             return
         if not self._files:
-            messagebox.showwarning("No Files", "Please select HTML files first.")
+            messagebox.showwarning("No Files", "Please select HTML or PDF files first.")
             return
 
         for p in self._temp_pdfs:
@@ -1080,24 +1080,36 @@ class App(ctk.CTk):
                 try:
                     od = out or os.path.dirname(html)
                     stem = Path(html).stem
+                    ext = Path(html).suffix.lower()
                     op = os.path.join(od, stem + (".docx" if "DOCX" in fmt else ".pptx"))
 
-                    if "DOCX" in fmt:
-                        _, pdf = converter.html_to_docx(html, op,
-                            page_size=self.sidebar.page_size_var.get(),
-                            orientation=self.sidebar.orient_var.get(),
-                            margin_inches=self.sidebar.get_margin_inches(),
-                            on_status=self._log, keep_pdf=True)
-                        if pdf:
-                            last_pdf = pdf; self._temp_pdfs.append(pdf)
-                    else:
-                        shots = converter.render_html_screenshots(html,
-                            dpi=self.sidebar.get_dpi(), on_status=self._log)
-                        if shots:
-                            converter.html_to_editable_pptx(html, op,
+                    if ext == ".pdf":
+                        # Convert from PDF
+                        if "DOCX" in fmt:
+                            converter.pdf_to_docx(html, op, on_status=self._log)
+                        else:
+                            converter.pdf_to_editable_pptx(html, op,
                                 slide_size=self.sidebar.slide_size_var.get(),
                                 on_status=self._log)
-                            last_shots = shots
+                        last_pdf = html
+                    else:
+                        # Convert from HTML
+                        if "DOCX" in fmt:
+                            _, pdf = converter.html_to_docx(html, op,
+                                page_size=self.sidebar.page_size_var.get(),
+                                orientation=self.sidebar.orient_var.get(),
+                                margin_inches=self.sidebar.get_margin_inches(),
+                                on_status=self._log, keep_pdf=True)
+                            if pdf:
+                                last_pdf = pdf; self._temp_pdfs.append(pdf)
+                        else:
+                            shots = converter.render_html_screenshots(html,
+                                dpi=self.sidebar.get_dpi(), on_status=self._log)
+                            if shots:
+                                converter.html_to_editable_pptx(html, op,
+                                    slide_size=self.sidebar.slide_size_var.get(),
+                                    on_status=self._log)
+                                last_shots = shots
 
                     self._log(f"Saved: {os.path.basename(op)}", "success")
                     ok += 1
