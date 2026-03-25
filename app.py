@@ -280,7 +280,7 @@ class Sidebar(ctk.CTkFrame):
             font=ctk.CTkFont(size=11, weight="bold"),
             fg_color=PAL["surface_2"], hover_color=PAL["danger"],
             text_color=PAL["t4"], corner_radius=8,
-            command=lambda: self.app.set_files([]))
+            command=self._clear_files)
         self.clear_btn.pack_forget()
 
         # File list container
@@ -436,12 +436,21 @@ class Sidebar(ctk.CTkFrame):
             ).pack(side="left", padx=(SP["sm"], 0), fill="x", expand=True)
 
     def _browse(self):
+        if self.app._converting:
+            self.app._log("Cannot add files while conversion is running.", "warn")
+            return
         paths = filedialog.askopenfilenames(
             filetypes=[("HTML & PDF Files", "*.html *.htm *.pdf"), ("All", "*.*")])
         if paths:
             existing = set(self.app._files)
             new = [p for p in paths if p not in existing]
             self.app.set_files(self.app._files + new)
+
+    def _clear_files(self):
+        if self.app._converting:
+            self.app._log("Cannot clear files while conversion is running.", "warn")
+            return
+        self.app.set_files([])
 
     def _browse_output(self):
         p = filedialog.askdirectory()
@@ -986,14 +995,48 @@ class App(ctk.CTk):
         self.after(150, self.preview._render)
 
     def set_files(self, files):
-        self._files = files
+        normalized = []
+        seen = set()
+        allowed = {".html", ".htm", ".pdf"}
+
+        for p in files:
+            if not p:
+                continue
+            ap = os.path.abspath(p)
+            if ap in seen:
+                continue
+            seen.add(ap)
+
+            ext = Path(ap).suffix.lower()
+            if ext not in allowed:
+                self._log(f"Skipped unsupported file type: {os.path.basename(ap)}", "warn")
+                continue
+            if not os.path.isfile(ap):
+                self._log(f"Skipped missing file: {ap}", "warn")
+                continue
+            normalized.append(ap)
+
+        self._files = normalized
         self.sidebar.update_file_list(self._files)
-        self._log(f"Selected {len(files)} file(s)")
+        self._log(f"Selected {len(self._files)} file(s)")
 
     def remove_file(self, i):
+        if self._converting:
+            self._log("Cannot remove files while conversion is running.", "warn")
+            return
         if 0 <= i < len(self._files):
             self._files.pop(i)
             self.sidebar.update_file_list(self._files)
+
+    def _unique_output_path(self, desired_path, used_outputs):
+        root, ext = os.path.splitext(desired_path)
+        candidate = desired_path
+        n = 1
+        while candidate in used_outputs or os.path.exists(candidate):
+            candidate = f"{root} ({n}){ext}"
+            n += 1
+        used_outputs.add(candidate)
+        return candidate
 
     def _log(self, msg, level="info"):
         self.after(0, lambda: self.log.log(msg, level))
@@ -1052,6 +1095,24 @@ class App(ctk.CTk):
             messagebox.showwarning("No Files", "Please select HTML or PDF files first.")
             return
 
+        out = self.sidebar.get_output_dir()
+        if out:
+            out = os.path.abspath(out)
+            if not os.path.isdir(out):
+                messagebox.showerror("Invalid Output Folder", f"Folder does not exist:\n{out}")
+                return
+            if not os.access(out, os.W_OK):
+                messagebox.showerror("Output Folder Not Writable", f"No write access to:\n{out}")
+                return
+
+        files_snapshot = [
+            os.path.abspath(p) for p in self._files
+            if os.path.isfile(p) and Path(p).suffix.lower() in {".html", ".htm", ".pdf"}
+        ]
+        if not files_snapshot:
+            messagebox.showwarning("No Valid Files", "No valid existing HTML/PDF files were found.")
+            return
+
         for p in self._temp_pdfs:
             try: os.unlink(p)
             except OSError: pass
@@ -1061,17 +1122,18 @@ class App(ctk.CTk):
         self._set_progress(0)
         self._set_status("Starting…", PAL["warn"])
         self.preview.clear()
-        threading.Thread(target=self._convert, daemon=True).start()
+        threading.Thread(target=self._convert, args=(files_snapshot,), daemon=True).start()
 
-    def _convert(self):
+    def _convert(self, files_snapshot):
         fmt = self.sidebar.format_var.get()
         out = self.sidebar.get_output_dir()
-        total = len(self._files)
+        total = len(files_snapshot)
         ok = 0
         last_pdf = last_shots = None
+        used_outputs = set()
 
         try:
-            for i, html in enumerate(self._files):
+            for i, html in enumerate(files_snapshot):
                 base = os.path.basename(html)
                 self._log(f"Processing: {base}")
                 self._set_status(f"Converting {i+1}/{total}…", PAL["warn"])
@@ -1081,7 +1143,8 @@ class App(ctk.CTk):
                     od = out or os.path.dirname(html)
                     stem = Path(html).stem
                     ext = Path(html).suffix.lower()
-                    op = os.path.join(od, stem + (".docx" if "DOCX" in fmt else ".pptx"))
+                    desired_op = os.path.join(od, stem + (".docx" if "DOCX" in fmt else ".pptx"))
+                    op = self._unique_output_path(desired_op, used_outputs)
 
                     if ext == ".pdf":
                         # Convert from PDF

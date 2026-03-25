@@ -170,10 +170,14 @@ def render_to_pdf(
     on_status: Optional[Callable[[str], None]] = None,
 ) -> str:
     """Synchronous wrapper for PDF rendering."""
-    loop = _get_event_loop()
-    return loop.run_until_complete(
+    return asyncio.run(
         _render_html_to_pdf(
-            html_path, pdf_path, page_size, orientation, margin_inches, on_status
+            html_path,
+            pdf_path,
+            page_size,
+            orientation,
+            margin_inches,
+            on_status,
         )
     )
 
@@ -355,8 +359,7 @@ def render_html_screenshots(
 ) -> list[bytes]:
     """Synchronous wrapper for screenshot rendering."""
     scale = dpi / 96.0
-    loop = _get_event_loop()
-    return loop.run_until_complete(
+    return asyncio.run(
         _render_html_pages(
             html_path,
             viewport_width=1200,
@@ -752,138 +755,358 @@ def pdf_to_editable_pptx(
     slide_size: str = "Widescreen (16:9)",
     on_status: Optional[Callable[[str], None]] = None,
 ) -> str:
-    """Parse PDF to native editable PPTX elements (text, vector, images)."""
+    """Convert PDF pages to maximally editable PPTX objects."""
     import fitz
+    from io import BytesIO
     from pptx import Presentation
     from pptx.util import Pt, Inches
     from pptx.dml.color import RGBColor
+
     try:
-        from pptx.enum.shapes import MSO_SHAPE
+        from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
         RECTANGLE = MSO_SHAPE.RECTANGLE
+        STRAIGHT_CONNECTOR = MSO_CONNECTOR.STRAIGHT
     except ImportError:
         RECTANGLE = 1
-    from io import BytesIO
+        STRAIGHT_CONNECTOR = 1
 
     status = on_status or (lambda _: None)
     status("Parsing PDF to editable PPTX...")
 
+    def _float_to_rgb(color):
+        if not color:
+            return None
+        if isinstance(color, int):
+            b = color & 255
+            g = (color >> 8) & 255
+            r = (color >> 16) & 255
+            return (r, g, b)
+        if isinstance(color, (list, tuple)) and len(color) >= 3:
+            vals = []
+            for c in color[:3]:
+                c = 0.0 if c is None else float(c)
+                c = max(0.0, min(1.0, c))
+                vals.append(int(round(c * 255)))
+            return tuple(vals)
+        return None
+
+    def _set_fill(shape, rgb):
+        if rgb is None:
+            shape.fill.background()
+            return
+        shape.fill.solid()
+        shape.fill.fore_color.rgb = RGBColor(*rgb)
+
+    def _set_line(shape, rgb, width_pt):
+        if rgb is None:
+            shape.line.fill.background()
+            return
+        shape.line.color.rgb = RGBColor(*rgb)
+        if width_pt and width_pt > 0:
+            shape.line.width = Pt(max(width_pt, 0.25))
+
+    def _as_fitz_rect(bbox):
+        if not bbox:
+            return fitz.Rect(0, 0, 0, 0)
+        if isinstance(bbox, fitz.Rect):
+            return bbox
+        if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+            return fitz.Rect(bbox[0], bbox[1], bbox[2], bbox[3])
+        return fitz.Rect(0, 0, 0, 0)
+
+    def _collect_table_regions(page):
+        regions = []
+        tables_payload = []
+        page_area = max(page.rect.get_area(), 1.0)
+        try:
+            finder = page.find_tables()
+            for t in finder.tables:
+                try:
+                    tb = _as_fitz_rect(t.bbox)
+                    if tb.width <= 0 or tb.height <= 0:
+                        continue
+                    area_ratio = tb.get_area() / page_area
+                    # Guardrail: ignore suspiciously huge "table" detections.
+                    if area_ratio > 0.65:
+                        continue
+                    extracted = t.extract() or []
+                    if extracted:
+                        tables_payload.append((tb, extracted))
+                        regions.append(tb)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return regions, tables_payload
+
     prs = Presentation()
     blank_layout = prs.slide_layouts[6]
+    metrics = {
+        "pages": 0,
+        "backgrounds": 0,
+        "vectors": 0,
+        "lines": 0,
+        "images": 0,
+        "tables": 0,
+        "text_boxes": 0,
+        "text_runs": 0,
+        "raster_fallback_pages": 0,
+    }
+    warnings = []
 
-    doc = fitz.open(pdf_path)
-
-    if len(doc) > 0:
-        page_rect = doc[0].rect
-        pdf_w, pdf_h = page_rect.width, page_rect.height
-        prs.slide_width = Pt(max(pdf_w, 10))
-        prs.slide_height = Pt(max(pdf_h, 10))
-    else:
-        if "4:3" in slide_size:
-            prs.slide_width = Inches(10)
-            prs.slide_height = Inches(7.5)
+    with fitz.open(pdf_path) as doc:
+        if len(doc) > 0:
+            page_rect = doc[0].rect
+            prs.slide_width = Pt(max(page_rect.width, 10))
+            prs.slide_height = Pt(max(page_rect.height, 10))
         else:
-            prs.slide_width = Inches(13.333)
-            prs.slide_height = Inches(7.5)
+            if "4:3" in slide_size:
+                prs.slide_width = Inches(10)
+                prs.slide_height = Inches(7.5)
+            else:
+                prs.slide_width = Inches(13.333)
+                prs.slide_height = Inches(7.5)
 
-    for i in range(len(doc)):
-        status(f"Processing PDF page {i+1}/{len(doc)}...")
-        page = doc[i]
-        slide = prs.slides.add_slide(blank_layout)
+        metrics["pages"] = len(doc)
 
-        for img in page.get_images(full=True):
-            xref = img[0]
+        for i in range(len(doc)):
+            status(f"Processing PDF page {i + 1}/{len(doc)}...")
+            page = doc[i]
+            page_rect = page.rect
+            slide = prs.slides.add_slide(blank_layout)
+
+            # Always add an editable background shape at z-order bottom.
+            bg_shape = slide.shapes.add_shape(
+                RECTANGLE, Pt(0), Pt(0), Pt(page_rect.width), Pt(page_rect.height)
+            )
+            _set_fill(bg_shape, (255, 255, 255))
+            bg_shape.line.fill.background()
+            metrics["backgrounds"] += 1
+
+            page_native_count = 0
+            _, extracted_tables = _collect_table_regions(page)
+
+            drawings = []
             try:
-                base_image = doc.extract_image(xref)
-                if not base_image: continue
-                image_bytes = base_image["image"]
-                rects = page.get_image_rects(img)
-                for rect in rects:
-                    try:
-                        slide.shapes.add_picture(
-                            BytesIO(image_bytes),
-                            Pt(rect.x0), Pt(rect.y0),
-                            width=Pt(rect.width), height=Pt(rect.height)
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                drawings = page.get_drawings()
+            except Exception as e:
+                warnings.append(f"Page {i + 1}: drawing extraction failed ({e})")
 
-        paths = page.get_drawings()
-        for p in paths:
-            rect = p["rect"]
-            try:
-                if rect.width <= 0 or rect.height <= 0: continue
-                
-                stroke_color = p.get("color")
-                fill_color = p.get("fill")
-                
-                if not stroke_color and not fill_color:
+            # 1) Use near full-page filled vector as editable background color.
+            for path in drawings:
+                rect = _as_fitz_rect(path.get("rect"))
+                fill_rgb = _float_to_rgb(path.get("fill"))
+                if fill_rgb is None or rect.width <= 0 or rect.height <= 0:
+                    continue
+                w_cov = rect.width / max(page_rect.width, 1)
+                h_cov = rect.height / max(page_rect.height, 1)
+                if w_cov >= 0.98 and h_cov >= 0.98:
+                    _set_fill(bg_shape, fill_rgb)
+                    break
+
+            # 2) Render vector drawings as editable native shapes/connectors.
+            for path in drawings:
+                stroke_rgb = _float_to_rgb(path.get("color"))
+                fill_rgb = _float_to_rgb(path.get("fill"))
+                width_pt = path.get("width", 0.75) or 0.75
+
+                if not stroke_rgb and not fill_rgb:
                     continue
 
-                shape = slide.shapes.add_shape(
-                    RECTANGLE,
-                    Pt(rect.x0), Pt(rect.y0),
-                    Pt(rect.width), Pt(rect.height)
-                )
-                
-                if fill_color:
-                    shape.fill.solid()
-                    shape.fill.fore_color.rgb = RGBColor(
-                        int(fill_color[0]*255), int(fill_color[1]*255), int(fill_color[2]*255)
-                    )
-                else:
-                    shape.fill.background()
-                    
-                if stroke_color:
-                    shape.line.color.rgb = RGBColor(
-                        int(stroke_color[0]*255), int(stroke_color[1]*255), int(stroke_color[2]*255)
-                    )
-                else:
-                    shape.line.fill.background()
-            except Exception:
-                pass
+                try:
+                    items = path.get("items", [])
+                    if len(items) == 1 and items[0] and items[0][0] == "l":
+                        p0 = items[0][1]
+                        p1 = items[0][2]
+                        line = slide.shapes.add_connector(
+                            STRAIGHT_CONNECTOR, Pt(p0.x), Pt(p0.y), Pt(p1.x), Pt(p1.y)
+                        )
+                        _set_line(line, stroke_rgb or fill_rgb, width_pt)
+                        metrics["lines"] += 1
+                        page_native_count += 1
+                        continue
 
-        text_dict = page.get_text("dict")
-        for block in text_dict.get("blocks", []):
-            if block["type"] == 0:
-                for line in block.get("lines", []):
-                    for span in line.get("spans", []):
-                        text = span["text"].strip()
-                        if not text: continue
-                        
-                        font_size = span["size"]
-                        color_int = span["color"]
-                        b = color_int & 255
-                        g = (color_int >> 8) & 255
-                        r = (color_int >> 16) & 255
-                        
-                        bbox = span["bbox"]
-                        width = max(Pt(bbox[2] - bbox[0]), Pt(10))
-                        height = max(Pt(bbox[3] - bbox[1]), Pt(10))
-                        
+                    rect = _as_fitz_rect(path.get("rect"))
+                    if rect.width <= 0 or rect.height <= 0:
+                        continue
+
+                    # Skip near full-page filled background vector (already handled).
+                    w_cov = rect.width / max(page_rect.width, 1)
+                    h_cov = rect.height / max(page_rect.height, 1)
+                    if w_cov >= 0.98 and h_cov >= 0.98 and fill_rgb:
+                        continue
+
+                    shape = slide.shapes.add_shape(
+                        RECTANGLE, Pt(rect.x0), Pt(rect.y0), Pt(rect.width), Pt(rect.height)
+                    )
+                    _set_fill(shape, fill_rgb)
+                    _set_line(shape, stroke_rgb, width_pt)
+                    metrics["vectors"] += 1
+                    page_native_count += 1
+                except Exception:
+                    continue
+
+            # 3) Render bitmap images as separate editable picture objects.
+            for img in page.get_images(full=True):
+                xref = img[0]
+                try:
+                    extracted = doc.extract_image(xref)
+                    if not extracted:
+                        continue
+                    image_bytes = extracted.get("image")
+                    if not image_bytes:
+                        continue
+
+                    rects = page.get_image_rects(img)
+                    for rect in rects:
+                        if rect.width <= 0 or rect.height <= 0:
+                            continue
                         try:
-                            txBox = slide.shapes.add_textbox(Pt(bbox[0]), Pt(bbox[1]), width, height)
-                            tf = txBox.text_frame
-                            tf.word_wrap = False
-                            
-                            tf.margin_bottom = 0
-                            tf.margin_top = 0
-                            tf.margin_left = 0
-                            tf.margin_right = 0
-                            
-                            p_para = tf.paragraphs[0]
-                            p_para.text = text
-                            p_para.font.size = Pt(font_size)
-                            p_para.font.color.rgb = RGBColor(r, g, b)
-                            
-                            flags = span["flags"]
-                            if flags & (1 << 4): p_para.font.bold = True
-                            if flags & (1 << 1): p_para.font.italic = True
+                            slide.shapes.add_picture(
+                                BytesIO(image_bytes),
+                                Pt(rect.x0),
+                                Pt(rect.y0),
+                                width=Pt(rect.width),
+                                height=Pt(rect.height),
+                            )
+                            metrics["images"] += 1
+                            page_native_count += 1
                         except Exception:
-                            pass
+                            continue
+                except Exception:
+                    continue
 
-    doc.close()
+            # 4) Add editable table objects where table structure can be detected.
+            for table_rect, rows in extracted_tables:
+                try:
+                    row_count = len(rows)
+                    col_count = max(len(r) for r in rows) if row_count else 0
+                    if row_count == 0 or col_count == 0:
+                        continue
+                    shape = slide.shapes.add_table(
+                        row_count,
+                        col_count,
+                        Pt(table_rect.x0),
+                        Pt(table_rect.y0),
+                        Pt(table_rect.width),
+                        Pt(table_rect.height),
+                    )
+                    table = shape.table
+                    for ridx, row in enumerate(rows):
+                        for cidx in range(col_count):
+                            txt = row[cidx] if cidx < len(row) and row[cidx] is not None else ""
+                            cell = table.cell(ridx, cidx)
+                            cell.text = str(txt)
+                            para = cell.text_frame.paragraphs[0]
+                            para.font.size = Pt(10)
+                            if ridx == 0:
+                                para.font.bold = True
+                    metrics["tables"] += 1
+                    page_native_count += 1
+                except Exception:
+                    continue
+
+            # 5) Add text spans as editable text runs with styling and position.
+            text_dict = page.get_text("dict")
+            for block in text_dict.get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+
+                brect = _as_fitz_rect(block.get("bbox"))
+
+                lines = block.get("lines", [])
+                if not lines:
+                    continue
+
+                span_lines = []
+                for line in lines:
+                    valid_spans = []
+                    for span in line.get("spans", []):
+                        text = span.get("text", "")
+                        if text is None or text == "":
+                            continue
+                        valid_spans.append(span)
+                    if valid_spans:
+                        span_lines.append(valid_spans)
+
+                if not span_lines:
+                    continue
+
+                left = Pt(max(brect.x0, 0))
+                top = Pt(max(brect.y0, 0))
+                width = Pt(max(brect.width, 4))
+                height = Pt(max(brect.height, 4))
+
+                try:
+                    text_box = slide.shapes.add_textbox(left, top, width, height)
+                    text_frame = text_box.text_frame
+                    text_frame.clear()
+                    text_frame.word_wrap = True
+                    text_frame.margin_bottom = 0
+                    text_frame.margin_top = 0
+                    text_frame.margin_left = 0
+                    text_frame.margin_right = 0
+
+                    first_para = True
+                    for spans in span_lines:
+                        para = text_frame.paragraphs[0] if first_para else text_frame.add_paragraph()
+                        first_para = False
+                        para.level = 0
+
+                        for span in spans:
+                            run = para.add_run()
+                            run.text = span.get("text", "")
+                            font = run.font
+
+                            font_name = span.get("font")
+                            if font_name:
+                                font.name = font_name
+
+                            font_size = span.get("size")
+                            if font_size:
+                                font.size = Pt(max(float(font_size), 1.0))
+
+                            rgb = _float_to_rgb(span.get("color"))
+                            if rgb:
+                                font.color.rgb = RGBColor(*rgb)
+
+                            flags = int(span.get("flags", 0) or 0)
+                            font.bold = bool(flags & 16)
+                            font.italic = bool(flags & 2)
+                            metrics["text_runs"] += 1
+
+                    metrics["text_boxes"] += 1
+                    page_native_count += 1
+                except Exception:
+                    continue
+
+            # 6) Safe fallback: if extraction produced no native content, preserve visual page.
+            if page_native_count == 0:
+                try:
+                    pix = page.get_pixmap(dpi=150, alpha=False)
+                    slide.shapes.add_picture(
+                        BytesIO(pix.tobytes("png")),
+                        Pt(0),
+                        Pt(0),
+                        width=Pt(page_rect.width),
+                        height=Pt(page_rect.height),
+                    )
+                    metrics["raster_fallback_pages"] += 1
+                    warnings.append(
+                        f"Page {i + 1}: no native elements extracted, used raster fallback"
+                    )
+                except Exception as e:
+                    warnings.append(f"Page {i + 1}: fallback rendering failed ({e})")
+
     prs.save(output_path)
+    status(
+        "Editable PPTX summary: "
+        f"pages={metrics['pages']}, text_boxes={metrics['text_boxes']}, "
+        f"text_runs={metrics['text_runs']}, images={metrics['images']}, "
+        f"vectors={metrics['vectors']}, lines={metrics['lines']}, "
+        f"tables={metrics['tables']}, raster_fallback_pages={metrics['raster_fallback_pages']}"
+    )
+    if warnings:
+        status(f"Warnings: {len(warnings)} (check PDFs with complex vector paths/gradients)")
     status(f"Editable PPTX saved: {os.path.basename(output_path)}")
     return output_path

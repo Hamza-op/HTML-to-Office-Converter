@@ -13,7 +13,7 @@ A modern desktop application to convert HTML files into editable DOCX and PPTX f
 
 ## Requirements
 
-Ensure you have Python 3.8+ installed. The following libraries are required:
+Ensure you have Python 3.9+ installed. The following libraries are required:
 
 - `customtkinter`
 - `Pillow`
@@ -52,12 +52,28 @@ Ensure you have Python 3.8+ installed. The following libraries are required:
    **OR Run the Executable (Windows):**
    Simply double-click the `HTML-to-Office-Converter.exe` file. No Python installation is required.
 
-2. **Select Files**: Drag and drop your `.html` files into the input zone or click "Browse".
+2. **Select Files**: Click "Browse" and choose `.html`, `.htm`, or `.pdf` files.
 3. **Choose Output Format**:
    - **DOCX**: Options for page size, orientation, and margins are available.
    - **PPTX**: Options for slide size and quality are available.
 4. **Convert**: Click the **Convert Now** button. The built-in activity log will show real-time progress.
 5. **View Preview**: After conversion, you can navigate and zoom through a visual preview of the document right inside the app!
+
+## PDF -> Editable PPTX Quality Gate
+
+To validate production readiness for PDF to editable PPTX conversion, run:
+
+```bash
+python quality_gate_pdf_to_pptx.py --pdf input.pdf --convert --out output.pptx
+```
+
+The gate prints JSON coverage metrics for pages, text runs, images, vectors, and tables, and exits non-zero when thresholds fail.
+
+To score an already generated PPTX:
+
+```bash
+python quality_gate_pdf_to_pptx.py --pdf input.pdf --pptx output.pptx
+```
 ## Building the Executable (Windows)
 
 If you want to build the standalone `.exe` yourself:
@@ -66,22 +82,13 @@ If you want to build the standalone `.exe` yourself:
    ```bash
    pip install pyinstaller
    ```
-2. Choose a build type:
+2. Build executable:
+   ```bash
+   pyinstaller --noconfirm HTML_to_Office_Converter.spec
+   ```
 
-   - **Fast start (recommended)**: folder-based build (starts much faster than onefile)
-     ```bash
-     pyinstaller HTML-to-Office-Converter.onedir.spec
-     ```
-
-   - **Single EXE**: onefile build (larger and slower to start because it unpacks on every launch)
-     ```bash
-     pyinstaller HTML-to-Office-Converter.spec
-     ```
-
-3. The output will be generated in the `dist` folder.
-
-   - `onedir`: `dist/HTML-to-Office-Converter/HTML-to-Office-Converter.exe`
-   - `onefile`: `dist/HTML-to-Office-Converter.exe`
+3. The output will be generated in the `dist` folder:
+   - `dist/HTML_to_Office_Converter.exe`
 
 ## Notes On EXE Size / Startup
 
