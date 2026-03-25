@@ -60,8 +60,8 @@ jobs:
           name: ${{ startsWith(github.ref, 'refs/tags/') && format('Release {0}', github.ref_name) || 'Latest Build (Main Branch)' }}
           target_commitish: ${{ github.sha }}
           draft: false
-          prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          prerelease: false
           generate_release_notes: true
-          make_latest: ${{ startsWith(github.ref, 'refs/tags/') }}
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
