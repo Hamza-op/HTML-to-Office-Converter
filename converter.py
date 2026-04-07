@@ -5,6 +5,7 @@ HTML → Playwright (render) → Screenshots → PPTX
 """
 
 import asyncio
+import math
 import os
 import sys
 import platform
@@ -33,19 +34,6 @@ DPI_PRESETS = {
     "High (200 DPI)": 200,
     "Ultra (300 DPI)": 300,
 }
-
-
-def _get_event_loop():
-    """Get or create an event loop that works across platforms."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            raise RuntimeError
-        return loop
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        return loop
 
 
 def _build_file_url(abs_path: str) -> str:
@@ -533,11 +521,11 @@ def html_to_editable_pptx(
             
             popped_tag = None
             classes = ""
-            # Pop up to the matching tag
+            # Pop up to the matching tag (scan right-to-left for the most
+            # recent open of this tag; pop() already removes it in-place)
             for i in range(len(self.tag_stack) - 1, -1, -1):
                 if self.tag_stack[i][0] == tag:
                     popped_tag, classes = self.tag_stack.pop(i)
-                    self.tag_stack = self.tag_stack[:i]
                     break
                     
             if not popped_tag: return
@@ -614,7 +602,7 @@ def html_to_editable_pptx(
             p.font.color.rgb = color
             
             chars_per_line = 90 if font_size.pt < 18 else 45
-            lines = max(1, len(text) / chars_per_line)
+            lines = max(1, math.ceil(len(text) / chars_per_line))
             self.current_top += Inches((font_size.pt / 72.0) * lines * 1.5) + Inches(0.1)
 
         def _render_table(self):

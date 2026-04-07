@@ -101,10 +101,13 @@ class PulseButton(ctk.CTkButton):
         self._do_pulse()
 
     def _do_pulse(self):
-        if self._pulse and str(self.cget("state")) == "normal":
-            self.configure(fg_color=self._colors[self._pulse_idx % len(self._colors)])
-            self._pulse_idx += 1
-        self.after(400, self._do_pulse)
+        try:
+            if self._pulse and str(self.cget("state")) == "normal":
+                self.configure(fg_color=self._colors[self._pulse_idx % len(self._colors)])
+                self._pulse_idx += 1
+            self.after(400, self._do_pulse)
+        except Exception:
+            pass  # Widget was destroyed; stop the pulse loop
 
     def set_loading(self, loading: bool):
         self._pulse = not loading
@@ -185,6 +188,18 @@ class StatusDot(ctk.CTkFrame):
     def set_color(self, c):
         self._c = c
         self.configure(fg_color=c)
+
+    def start_pulse(self):
+        if not self._pulse:
+            self._pulse = True
+            self._animate()
+
+    def stop_pulse(self):
+        self._pulse = False
+        try:
+            self.configure(fg_color=self._c)
+        except Exception:
+            pass
 
 
 class Toast(ctk.CTkFrame):
@@ -500,7 +515,7 @@ class Sidebar(ctk.CTkFrame):
             ext_colors = {".html": ("#E44D26", "#FFF3EE"), ".htm": ("#E44D26", "#FFF3EE"), ".pdf": ("#D9383A", "#FCE8E8")}
             ec, ebg = ext_colors.get(ext, (PAL["accent"], PAL["accent_bg"]))
 
-            badge = ctk.CTkFrame(card, fg_color=ebg if isinstance(ebg, str) else ebg,
+            badge = ctk.CTkFrame(card, fg_color=ebg,
                 corner_radius=4, width=32, height=18)
             badge.pack(side="left", padx=(SP["sm"], 0))
             badge.pack_propagate(False)
@@ -524,12 +539,11 @@ class Sidebar(ctk.CTkFrame):
             except OSError:
                 pass
 
-            idx = i
             ctk.CTkButton(card, text="✕", width=22, height=22,
                 font=ctk.CTkFont(size=10, weight="bold"),
                 fg_color="transparent", hover_color=PAL["danger"],
                 text_color=PAL["t5"], corner_radius=8,
-                command=lambda j=idx: self.app.remove_file(j)
+                command=lambda j=i: self.app.remove_file(j)
                 ).pack(side="right", padx=(0, SP["sm"]))
 
             self.file_widgets.append(card)
@@ -748,10 +762,11 @@ class PreviewPanel(ctk.CTkFrame):
             return
 
         pad = 24
-        max_w = int((cw - pad * 2) * self._zoom)
-        max_h = int((ch - pad * 2) * self._zoom)
+        base_w = cw - pad * 2
+        base_h = ch - pad * 2
         iw, ih = img.size
-        r = min(max_w / iw, max_h / ih, self._zoom)
+        # Fit-to-canvas ratio first, then scale by zoom factor
+        r = min(base_w / iw, base_h / ih) * self._zoom
         nw, nh = max(int(iw * r), 1), max(int(ih * r), 1)
 
         resized = img.resize((nw, nh), Image.LANCZOS)
@@ -1166,13 +1181,18 @@ class App(ctk.CTk):
                             if pdf:
                                 last_pdf = pdf; self._temp_pdfs.append(pdf)
                         else:
-                            shots = converter.render_html_screenshots(html,
-                                dpi=self.sidebar.get_dpi(), on_status=self._log)
-                            if shots:
-                                converter.html_to_editable_pptx(html, op,
-                                    slide_size=self.sidebar.slide_size_var.get(),
-                                    on_status=self._log)
-                                last_shots = shots
+                            # Build the editable PPTX from HTML parsing (no browser needed)
+                            converter.html_to_editable_pptx(html, op,
+                                slide_size=self.sidebar.slide_size_var.get(),
+                                on_status=self._log)
+                            # Screenshots are best-effort; only used for preview panel
+                            try:
+                                shots = converter.render_html_screenshots(
+                                    html, dpi=self.sidebar.get_dpi(), on_status=self._log)
+                                if shots:
+                                    last_shots = shots
+                            except Exception as _prev_e:
+                                self._log(f"Preview capture skipped: {_prev_e}", "warn")
 
                     self._log(f"Saved: {os.path.basename(op)}", "success")
                     ok += 1
