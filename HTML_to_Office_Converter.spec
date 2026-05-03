@@ -1,19 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 hidden_imports = [
-    "playwright",
     "playwright.async_api",
-    "playwright._impl._driver",
+    "playwright.sync_api",
     "pdf2docx",
     "fitz",
     "pptx",
     "pptx.util",
     "pptx.dml.color",
     "pptx.enum.shapes",
-    "customtkinter",
-    "PIL",
-    "PIL.Image",
-    "PIL.ImageTk",
+    "pptx.enum.text",
+    "pdf_extract",
+    "pptx_writer",
+    "scene_graph",
 ]
 
 # Packages that get auto-pulled but are not needed — saves significant MB
